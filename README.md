@@ -1,3 +1,8 @@
-# AI Programming with Python Project
+# example to run train.py
 
-Project code for Udacity's AI Programming with Python Nanodegree program. In this project, students first develop code for an image classifier built with PyTorch, then convert it into a command line application.
+python train.py ./flowers/ --save_dir ./ --arch vgg19_bn --learning_rate 0.001 --hidden_units 4096 4096 1024 --epoch 4 --
+gpu
+
+# example to run predict.py
+
+python predict.py ./flowers/test/17/image_03830.jpg ./checkpoint.pth --top_k 3 --category_names ./cat_to_name.json --gpu
