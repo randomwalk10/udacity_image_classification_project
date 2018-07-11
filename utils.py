@@ -7,14 +7,12 @@ std = (0.229, 0.224, 0.225)
 # preprocessing data
 # create data loader with transformations attached
 train_transforms = transforms.Compose([transforms.RandomVerticalFlip(),
-                                       transforms.Resize((256, 256)),
-                                       transforms.RandomCrop((224, 224)),
+                                       transforms.RandomResizedCrop(224),
                                        transforms.ToTensor(),
                                        transforms.Normalize(mean, std)])
 
-validate_transforms = transforms.Compose([transforms.Resize((256, 256)),
-                                          transforms.CenterCrop((224,
-                                                                 224)),
+validate_transforms = transforms.Compose([transforms.Resize(256),
+                                          transforms.CenterCrop(224),
                                           transforms.ToTensor(),
                                           transforms.Normalize(mean, std)])
 
@@ -37,7 +35,7 @@ def preprocessData(image_dir='', data_type='train'):
 
     """
     if data_type not in transform_map.keys():
-        return None
+        raise NameError('wrong data type {}'.format(data_type))
     # directories for train, validate, and test data
     data_path = image_dir + data_type
     # define transforms

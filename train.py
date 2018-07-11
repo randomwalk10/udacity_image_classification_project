@@ -20,7 +20,8 @@ def parseInputsForTraining():
                         help='directory to save a checkpoint')
     parser.add_argument("--arch", action='store',
                         default='vgg11', dest='arch',
-                        help='arch of VGG model(vgg11, vgg13, vgg19_bn, etc.)')
+                        help='arch of pretrained model, '
+                        'only vgg19_bn, resnet18, densenet121 are supported')
     parser.add_argument("--learning_rate", action='store', type=float,
                         default=0.001, dest='learning_rate',
                         help='learning rate, 0.001 by default')

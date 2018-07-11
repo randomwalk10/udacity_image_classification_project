@@ -28,6 +28,12 @@
 import torch
 import torchvision
 from torchvision import transforms
+import json
+from torchvision import models
+from torch import nn
+from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 # ## Load the data
@@ -52,24 +58,22 @@ test_dir = data_dir + '/test'
 
 
 # TODO: Define your transforms for the training, validation, and testing sets
+mean = (0.485, 0.456, 0.406)
+std = (0.229, 0.224, 0.225)
 train_transforms = transforms.Compose([transforms.RandomVerticalFlip(),
-                                      transforms.Resize((256, 256)),
-                                      transforms.RandomCrop((224, 224)),
+                                      transforms.RandomResizedCrop(224),
                                       transforms.ToTensor(),
-                                      transforms.Normalize((0.485, 0.456, 0.406),
-                                                           (0.229, 0.224, 0.225))])
+                                      transforms.Normalize(mean, std)])
 
-validation_transforms = transforms.Compose([transforms.Resize((256, 256)),
-                                            transforms.CenterCrop((224, 224)),
+validation_transforms = transforms.Compose([transforms.Resize(256),
+                                            transforms.CenterCrop(224),
                                             transforms.ToTensor(),
-                                            transforms.Normalize((0.485, 0.456, 0.406),
-                                                                 (0.229, 0.224, 0.225))])
+                                            transforms.Normalize(mean, std)])
 
-test_transforms = transforms.Compose([transforms.Resize((256, 256)),
-                                      transforms.CenterCrop((224, 224)),
+test_transforms = transforms.Compose([transforms.Resize(256),
+                                      transforms.CenterCrop(224),
                                       transforms.ToTensor(),  
-                                      transforms.Normalize((0.485, 0.456, 0.406),
-                                                           (0.229, 0.224, 0.225))])
+                                      transforms.Normalize(mean, std)])
 
 # TODO: Load the datasets with ImageFolder
 train_datasets = torchvision.datasets.ImageFolder(train_dir,
@@ -80,8 +84,8 @@ test_datasets = torchvision.datasets.ImageFolder(test_dir, transform=test_transf
 
 # TODO: Using the image datasets and the trainforms, define the dataloaders
 train_loader = torch.utils.data.DataLoader(train_datasets, batch_size=64, shuffle=True)
-validation_loader = torch.utils.data.DataLoader(validation_datasets, batch_size=32)
-test_loader = torch.utils.data.DataLoader(test_datasets, batch_size=32)
+validation_loader = torch.utils.data.DataLoader(validation_datasets, batch_size=64)
+test_loader = torch.utils.data.DataLoader(test_datasets, batch_size=64)
 
 
 # ### Label mapping
@@ -90,8 +94,6 @@ test_loader = torch.utils.data.DataLoader(test_datasets, batch_size=32)
 
 # In[4]:
 
-
-import json
 
 with open('cat_to_name.json', 'r') as f:
     cat_to_name = json.load(f)
@@ -127,9 +129,6 @@ with open('cat_to_name.json', 'r') as f:
 
 
 # load a pre-trained network(with gradient turned off)
-from torchvision import models
-from torch import nn
-
 model = models.vgg19_bn(pretrained=True)
 for param in model.parameters():
     param.requires_grad = False
@@ -160,7 +159,7 @@ model.classifier
 
 # prepare training
 criterion = torch.nn.NLLLoss()
-optimizer = torch.optim.Adam(model.classifier.parameters())
+optimizer = torch.optim.Adam(model.classifier.parameters(), lr=0.001)
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 model.to(device)
 
@@ -172,6 +171,7 @@ model.to(device)
 def validate(model, dataloader, device, loss_func):
     # turn on eval mode
     model.eval()
+    model.to(device)
     # turn off gradient tracking
     with torch.no_grad():
         loss_sum = 0.
@@ -200,8 +200,9 @@ def validate(model, dataloader, device, loss_func):
 
 
 # train and validate
-epochs = 3
+epochs = 4
 print_size = 10
+train_loss_sum = 0
 for e in range(epochs):
     for ii, (inputs, labels) in enumerate(train_loader):
         # turn on train mode
@@ -214,16 +215,21 @@ for e in range(epochs):
         preds = model.forward(inputs)
         # loss
         loss = criterion(preds, labels)
+        train_loss_sum += loss.item()
         # backward prop
         loss.backward()
         # update optimizer
         optimizer.step()
         # perform validation every print_size iterations in training
         if (ii+1)%print_size == 0:
-            loss_sum, accuracy = validate(model, validation_loader, device, criterion)
-            print("epoch {}/{} validation at step {}: loss {}, accuracy {}".format(
-                e+1, epochs, ii+1, loss_sum, accuracy))
+            validate_loss_sum, validate_accuracy = validate(model, validation_loader, device, criterion)
+            print("epoch {}/{} at step {}: ".format(e+1, epochs, ii+1))
+            print("\ttrain_loss {0:.4f} validate_loss {1:.4f}, validate_accuracy {2:.4f}".format(
+                train_loss_sum/print_size, validate_loss_sum, validate_accuracy))
+            train_loss_sum = 0
         pass
+    pass
+print("training is finished")
 
 
 # ## Testing your network
@@ -257,10 +263,9 @@ model_check_pt_path = "checkpoint.pth.tar"
 
 # TODO: Save the checkpoint 
 check_point = {
-    "epochs": epochs,
-    "print_size": print_size,
+    "arch": "vgg19_bn",
+    "classifier": model.classifier,
     "state_dict": model.state_dict(),
-    "optimizer": optimizer.state_dict(),
     "class_to_idx": train_datasets.class_to_idx,
 }
 
@@ -275,19 +280,33 @@ torch.save(check_point, model_check_pt_path)
 
 
 # TODO: Write a function that loads a checkpoint and rebuilds the model
-def load_checkpoint(pathname, model, optimizer):
+model_map = {
+    "vgg19_bn": models.vgg19_bn,
+    "resnet152": models.resnet152,
+    "densenet161": models.densenet161
+}
+
+def load_checkpoint(pathname):
+    # load check point
     check_pt = torch.load(pathname)
+    # create model
+    if check_pt['arch'] not in model_map.keys():
+        raise NameError("arch {} is not supported here".format(check_pt['arch']))
+    model = model_map[check_pt['arch']](True)
+    model.classifier = check_pt['classifier']
+    for param in model.parameters():
+        param.requires_grad = False
+    # load model state_dict
     model.load_state_dict(check_pt["state_dict"])
-    optimizer.load_state_dict(check_pt["optimizer"])
     model.class_to_idx = check_pt["class_to_idx"]
-    return check_pt["epochs"], check_pt["print_size"]
+    return model
 
 
 # In[15]:
 
 
-epochs, print_size = load_checkpoint(model_check_pt_path, model, optimizer)
-print("loaded epochs {}, print_size {}".format(epochs, print_size))
+model = load_checkpoint(model_check_pt_path)
+print("check point is loaded")
 _, test_accuracy = validate(model, test_loader, device, criterion)
 print("Results of validating on test set: accuracy {}".format(test_accuracy))
 
@@ -321,8 +340,6 @@ print("Results of validating on test set: accuracy {}".format(test_accuracy))
 # In[16]:
 
 
-from PIL import Image
-import numpy as np
 def process_image(im):
     ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
         returns an Numpy array
@@ -367,7 +384,6 @@ def process_image(im):
 # In[17]:
 
 
-import matplotlib.pyplot as plt
 def imshow(image, ax=None, title=None):
     """Imshow for Tensor."""
     if ax is None:
@@ -392,11 +408,11 @@ def imshow(image, ax=None, title=None):
     return ax
 
 
-# In[28]:
+# In[18]:
 
 
 target_class = '17'
-image_path = "flowers/train/"+target_class+"/image_03833.jpg"
+image_path = "flowers/train/"+target_class+"/image_03849.jpg"
 image = Image.open(image_path)
 im = process_image(image)
 imshow(im)
@@ -418,10 +434,8 @@ imshow(im)
 # > ['70', '3', '45', '62', '55']
 # ```
 
-# In[29]:
+# In[19]:
 
-
-idx_to_class = {v: k for k, v in model.class_to_idx.items()}
 
 def predict(image_path, model, topk=5):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
@@ -445,11 +459,13 @@ def predict(image_path, model, topk=5):
     # get tok k
     pred.squeeze_(0)
     top_k_prob, top_k_idx = torch.topk(pred, topk)
+    # get idx_to_class
+    idx_to_class = {v: k for k, v in model.class_to_idx.items()}
     # return
     return [x.item() for x in top_k_prob], [idx_to_class[x.item()] for x in top_k_idx]
 
 
-# In[30]:
+# In[20]:
 
 
 topk = 5
@@ -458,7 +474,7 @@ print(probs)
 print(classes)
 
 
-# In[31]:
+# In[21]:
 
 
 print([cat_to_name[x] for x in classes])
@@ -473,7 +489,7 @@ print("target is ", cat_to_name[target_class])
 # 
 # You can convert from the class integer encoding to actual flower names with the `cat_to_name.json` file (should have been loaded earlier in the notebook). To show a PyTorch tensor as an image, use the `imshow` function defined above.
 
-# In[32]:
+# In[22]:
 
 
 # TODO: Display an image along with the top 5 classes

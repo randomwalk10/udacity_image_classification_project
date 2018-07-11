@@ -8,26 +8,19 @@ from utils import test_transforms
 
 
 model_map = {
-    'vgg11': torchvision.models.vgg11,
-    'vgg11_bn': torchvision.models.vgg11_bn,
-    'vgg13': torchvision.models.vgg13,
-    'vgg13_bn': torchvision.models.vgg13_bn,
-    'vgg16': torchvision.models.vgg16,
-    'vgg16_bn': torchvision.models.vgg16_bn,
-    'vgg19': torchvision.models.vgg19,
     'vgg19_bn': torchvision.models.vgg19_bn,
+    'resnet18':  torchvision.models.resnet18,
+    'densenet121': torchvision.models.densenet121
 }
 
 
-def createClassifier(hidden_units=[]):
+def createClassifier(hidden_units, num_input, num_output):
     """this function create a classifier network
 
     :hidden_units: number of hidden units in classifier
     :returns: classifier
 
     """
-    num_input = 512*7*7
-    num_output = 102
     layers = []
     for i in range(len(hidden_units)):
         if not layers:
@@ -62,17 +55,38 @@ def createNetWork(arch, learn_rate=0.001, hidden_units=[]):
     """
     # initialize pre-trained network
     if arch not in model_map.keys():
-        return None, None, None
+        raise NameError('arch {} is not supported here'.format(arch))
     model = model_map[arch](True)
     for params in model.parameters():
         params.requires_grad = False
         pass
     # initialize classifer
-    model.classifier = createClassifier(hidden_units)
+    # initialize optimizer
+    num_output = 102
+    if arch == 'vgg19_bn':
+        num_input = model.classifier[0].in_features
+        model.classifier = createClassifier(hidden_units,
+                                            num_input, num_output)
+        optimizer = torch.optim.Adam(model.classifier.parameters(),
+                                     lr=learn_rate)
+        pass
+    elif arch == 'resnet18':
+        num_input = model.fc.in_features
+        model.fc = createClassifier(hidden_units, num_input, num_output)
+        optimizer = torch.optim.Adam(model.fc.parameters(),
+                                     lr=learn_rate)
+        pass
+    elif arch == 'densenet121':
+        num_input = model.classifier.in_features
+        model.classifier = createClassifier(hidden_units,
+                                            num_input, num_output)
+        optimizer = torch.optim.Adam(model.classifier.parameters(),
+                                     lr=learn_rate)
+        pass
+    else:
+        raise NameError('arch {} is not supported here'.format(arch))
     # loss function
     criterion = torch.nn.NLLLoss()
-    # initialize optimizer
-    optimizer = torch.optim.Adam(model.classifier.parameters(), lr=learn_rate)
     # return
     return model, criterion, optimizer
 
@@ -187,9 +201,17 @@ def saveCheckPoint(model, arch, hidden_units, class_to_idx,
 
     """
     idx_to_class = {v: k for k, v in class_to_idx.items()}
+    if arch == 'vgg19_bn' or arch == 'densenet121':
+        classifier = model.classifier
+        pass
+    elif arch == 'resnet18':
+        classifier = model.fc
+        pass
+    else:
+        raise NameError('arch {} is not supported here'.format(arch))
     checkpoint = {
         "arch": arch,
-        "hidden_units": hidden_units,
+        "classifier": classifier,
         "idx_to_class": idx_to_class,
         "state_dict": model.state_dict()
     }
@@ -209,9 +231,16 @@ def loadCheckPoint(load_dir):
     check_pt = torch.load(load_dir)
     arch = check_pt["arch"]
     if arch not in model_map.keys():
-        return None
+        raise NameError("arch {} is not supported here".format(arch))
     model = model_map[arch](True)
-    model.classifier = createClassifier(check_pt["hidden_units"])
+    if arch == 'vgg19_bn' or arch == 'densenet121':
+        model.classifier = check_pt["classifier"]
+        pass
+    elif arch == 'resnet18':
+        model.fc = check_pt["classifier"]
+        pass
+    else:
+        raise NameError('arch {} is not supported here'.format(arch))
     for params in model.parameters():
         params.requires_grad = False
         pass
